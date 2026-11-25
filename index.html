@@ -976,43 +976,6 @@ window.APPCHECK_DEBUG = false;
     render();
   }
 
-  // ONE-TIME CLEANUP (temporary): remove all 2026 data. Events left with no other
-  // year are deleted entirely. Only reachable via ?purge2026=1. Remove after use.
-  async function purge2026() {
-    const is26 = a => parseInt(a.year) === 2026;
-    const touched = shows.filter(s => (s.attendances || []).some(is26));
-    if (!touched.length) { showToast('No 2026 data found'); return; }
-    const toDelete = touched.filter(s => s.attendances.every(is26));
-    const toTrim = touched.filter(s => !s.attendances.every(is26));
-    const yearRows = touched.reduce((n, s) => n + s.attendances.filter(is26).length, 0);
-    const msg = `Permanently delete 2026 data for everyone?\n\n` +
-      `• ${yearRows} year record(s) across ${touched.length} event(s)\n` +
-      `• ${toDelete.length} event(s) have only 2026 and will be deleted entirely\n` +
-      `• ${toTrim.length} event(s) keep their other years\n\n` +
-      `An Excel backup will download first. This cannot be undone.`;
-    if (!confirm(msg)) return;
-    exportToExcel(); // backup of everything before deleting
-    await new Promise(r => setTimeout(r, 1500));
-    if (!confirm('Backup downloaded? Click OK to delete the 2026 data now.')) return;
-    const removedAtts = [];
-    toTrim.forEach(s => {
-      s.attendances.filter(is26).forEach(a => removedAtts.push({ showId: s.id, attId: a.id }));
-      s.attendances = s.attendances.filter(a => !is26(a));
-    });
-    const deleteIds = toDelete.map(s => s.id);
-    shows = shows.filter(s => !deleteIds.includes(s.id));
-    await saveShows();
-    for (const id of deleteIds) await cloudDeleteShow(id);
-    for (const r of removedAtts) {
-      try {
-        await deleteImageDocsWhere(['showId', '==', r.showId], ['attId', '==', r.attId]);
-        await deleteFileDocsWhere(['showId', '==', r.showId], ['attId', '==', r.attId]);
-      } catch (e) { console.error('cleanup failed', e); }
-    }
-    showToast(`Deleted 2026 data (${deleteIds.length} event(s) removed, ${toTrim.length} trimmed)`);
-    render();
-  }
-
   function setRating(val) {
     const s = getModalShow(); if (!s) return;
     s.rating = s.rating === val ? 0 : val;
@@ -1961,7 +1924,6 @@ window.APPCHECK_DEBUG = false;
             <button class="btn-secondary btn-sm" id="import-xlsx-btn" title="Import from Excel"><i class="ti ti-file-import"></i> Import</button>
             <input type="file" id="import-file-input" accept=".xlsx,.xls,.csv" style="display:none">
             <button class="btn-secondary btn-sm" id="export-xlsx-btn" title="Export to Excel"><i class="ti ti-file-spreadsheet"></i> Export</button>
-            ${new URLSearchParams(location.search).get('purge2026') === '1' ? `<button class="btn-secondary btn-sm" id="purge-2026-btn" style="color:#b42318;border-color:#b42318">Delete all 2026 data</button>` : ''}
             <button class="btn-primary" id="add-show-btn"><i class="ti ti-plus"></i> Add event</button>
             ${currentUser ? `<button class="btn-secondary btn-sm" id="signout-btn">Sign out</button>` : ''}
           </div>
@@ -2032,7 +1994,6 @@ window.APPCHECK_DEBUG = false;
 
     on('#add-show-btn', 'click', openNewShowModal);
     on('#export-xlsx-btn', 'click', exportToExcel);
-    on('#purge-2026-btn', 'click', purge2026);
     on('#import-xlsx-btn', 'click', () => { const inp = document.getElementById('import-file-input'); if (inp) inp.click(); });
     const importInput = document.getElementById('import-file-input');
     if (importInput) importInput.addEventListener('change', (e) => {
