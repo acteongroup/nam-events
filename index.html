@@ -101,7 +101,7 @@
   .toolbar {
     display: flex; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; align-items: center;
   }
-  input[type="text"], input[type="number"], input[type="date"], select, textarea {
+  input[type="text"], input[type="email"], input[type="number"], input[type="date"], select, textarea {
     font-family: inherit; font-size: 14px; padding: 9px 12px; border: 1px solid var(--border-strong);
     border-radius: var(--radius); background: #fff; color: var(--text-primary); width: 100%;
   }
@@ -291,6 +291,13 @@
     position: absolute; top: 4px; right: 4px; background: rgba(14,42,58,0.7); color: #fff;
     border: none; border-radius: 50%; width: 22px; height: 22px; font-size: 13px; padding: 0; line-height: 1;
   }
+  .gallery-year { font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.04em; margin-top: 14px; }
+  .gallery-item .photo-year-select {
+    position: absolute; left: 4px; bottom: 4px; width: auto; padding: 2px 4px; font-size: 11px;
+    border-radius: 6px; background: rgba(255,255,255,0.92);
+  }
+  .upload-year-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13px; color: var(--text-secondary); }
+  .upload-year-row select { width: auto; padding: 5px 8px; }
   .upload-zone {
     border: 2px dashed var(--border-strong); border-radius: var(--radius); padding: 18px;
     text-align: center; color: var(--text-muted); font-size: 13px; cursor: pointer; margin-top: 10px;
@@ -625,7 +632,7 @@ window.APPCHECK_DEBUG = false;
           const cloud = remoteImageDocs
             .filter(d => d.showId === s.id && d.attId === a.id)
             .sort((x, y) => (x.ts || 0) - (y.ts || 0))
-            .map(d => ({ id: d.id, dataUrl: d.dataUrl, caption: d.caption || '' }));
+            .map(d => ({ id: d.id, dataUrl: d.dataUrl, caption: d.caption || '', year: d.year || '', ts: d.ts || 0 }));
           if (!cloud.length && Array.isArray(a.images) && a.images.length) {
             // Legacy photos stored inline in the show doc — migrate them to the
             // images collection (keep showing them; the next snapshot carries them).
@@ -830,7 +837,7 @@ window.APPCHECK_DEBUG = false;
   function cloudSaveImage(showId, attId, img) {
     if (!useCloud || !db) return;
     db.collection('images').doc(img.id).set({
-      id: img.id, showId, attId, dataUrl: img.dataUrl, caption: img.caption || '', ts: Date.now()
+      id: img.id, showId, attId, dataUrl: img.dataUrl, caption: img.caption || '', year: img.year || null, ts: img.ts || Date.now()
     }).catch(e => { console.error('image save failed', e); showToast('Photo save failed — try a smaller image'); });
   }
   function cloudDeleteImage(imgId) {
@@ -1049,6 +1056,28 @@ window.APPCHECK_DEBUG = false;
     });
   }
 
+  // Year chosen in the gallery's "Upload to year" dropdown (null = the open year tab).
+  let uploadYear = null;
+  // A photo's year: its own assignment if set, else the year record it lives in.
+  const photoYear = (img, att) => parseInt(img.year) || att.year;
+  function photoYearOptions(s, selected) {
+    const cur = new Date().getFullYear();
+    const years = new Set();
+    for (let y = cur - 5; y <= cur + 2; y++) years.add(y);
+    s.attendances.forEach(a => { years.add(a.year); (a.images || []).forEach(i => years.add(photoYear(i, a))); });
+    if (selected) years.add(selected);
+    return [...years].filter(Boolean).sort((x, y) => y - x)
+      .map(y => `<option value="${y}" ${y === selected ? 'selected' : ''}>${y}</option>`).join('');
+  }
+  function setPhotoYear(attId, imgId, year) {
+    const s = getModalShow(); if (!s) return;
+    const a = s.attendances.find(a => a.id === attId); if (!a) return;
+    const img = (a.images || []).find(i => i.id === imgId); if (!img) return;
+    img.year = parseInt(year) || a.year;
+    render();
+    cloudSaveImage(s.id, a.id, img);
+  }
+
   function handleFiles(attId, files) {
     const s = getModalShow(); if (!s) return;
     const a = s.attendances.find(a => a.id === attId); if (!a) return;
@@ -1057,7 +1086,7 @@ window.APPCHECK_DEBUG = false;
       if (file.size > 15 * 1024 * 1024) { showToast(file.name + ' is too large (max 15MB)'); return; }
       try {
         const dataUrl = await compressImage(file, 1100, 0.68);
-        const img = { id: uid(), dataUrl, caption: '' };
+        const img = { id: uid(), dataUrl, caption: '', year: uploadYear || a.year };
         a.images.push(img);
         render();
         cloudSaveImage(s.id, attId, img); // persist immediately to the images collection
@@ -1898,14 +1927,30 @@ window.APPCHECK_DEBUG = false;
             <textarea id="f-yearnotes" data-att="${att.id}" placeholder="Year-specific notes">${esc(att.notes)}</textarea>
           </div>
 
-          <div class="section-title">Photo gallery — ${att.year}</div>
-          <div class="gallery-grid">
-            ${att.images.map(img => `
-              <div class="gallery-item">
-                <img src="${img.dataUrl}" alt="Event photo">
-                <button class="rm-btn" data-rm-img="${img.id}" data-att="${att.id}">✕</button>
+          <div class="section-title">Photo gallery</div>
+          ${(() => {
+            // All photos for this event, across every year, grouped by assigned year.
+            const all = [];
+            s.attendances.forEach(a => (a.images || []).forEach(img => all.push({ img, a, y: photoYear(img, a) })));
+            const byYear = {};
+            all.forEach(p => (byYear[p.y] = byYear[p.y] || []).push(p));
+            const ys = Object.keys(byYear).map(Number).sort((x, y) => y - x);
+            return ys.map(y => `
+              <div class="gallery-year">${y}</div>
+              <div class="gallery-grid">
+                ${byYear[y].map(({ img, a }) => `
+                  <div class="gallery-item">
+                    <img src="${img.dataUrl}" alt="Event photo ${y}">
+                    <button class="rm-btn" data-rm-img="${img.id}" data-att="${a.id}">✕</button>
+                    <select class="photo-year-select" data-photo-year="${img.id}" data-att="${a.id}" title="Year this photo belongs to">${photoYearOptions(s, y)}</select>
+                  </div>
+                `).join('')}
               </div>
-            `).join('')}
+            `).join('') || '<p class="file-empty">No photos yet.</p>';
+          })()}
+          <div class="upload-year-row">
+            <label for="upload-year">Upload photos to year</label>
+            <select id="upload-year">${photoYearOptions(s, uploadYear || att.year)}</select>
           </div>
           <div class="upload-zone" id="upload-zone" data-att="${att.id}">
             <i class="ti ti-upload"></i> Click or drag photos here to upload
@@ -2258,6 +2303,11 @@ window.APPCHECK_DEBUG = false;
         handleFiles(uploadZone.getAttribute('data-att'), e.dataTransfer.files);
       });
     }
+    const uploadYearSel = document.getElementById('upload-year');
+    if (uploadYearSel) uploadYearSel.addEventListener('change', (e) => { uploadYear = parseInt(e.target.value) || null; });
+    app.querySelectorAll('[data-photo-year]').forEach(sel => {
+      sel.addEventListener('change', (e) => setPhotoYear(sel.getAttribute('data-att'), sel.getAttribute('data-photo-year'), e.target.value));
+    });
     app.querySelectorAll('[data-rm-img]').forEach(btn => {
       btn.addEventListener('click', () => removeImage(btn.getAttribute('data-att'), btn.getAttribute('data-rm-img')));
     });
