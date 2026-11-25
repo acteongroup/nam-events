@@ -408,6 +408,7 @@ window.APPCHECK_DEBUG = false;
   let sortMode = 'name';
   let viewMode = 'planning'; // 'planning' | 'cards' | 'timeline'
   let planningYear = new Date().getFullYear(); // 'all' or a year number
+  let planningYearChosen = false; // true once the user clicks a year tab; until then we auto-pick a sensible default
   let planSortDir = 'asc'; // 'asc' = earliest date first, 'desc' = latest first
   let toastMsg = null;
   let toastTimer = null;
@@ -1608,6 +1609,15 @@ window.APPCHECK_DEBUG = false;
   }
 
   function renderPlanning() {
+    // Default year: if the user hasn't picked one and the current year has no events,
+    // open on the nearest upcoming year with events (else the latest year).
+    if (!planningYearChosen && planningYear !== 'all') {
+      const ys = getPlanningYears();
+      if (ys.length && !ys.includes(planningYear)) {
+        const cur = new Date().getFullYear();
+        planningYear = ys.find(y => y >= cur) || ys[ys.length - 1];
+      }
+    }
     const years = getPlanningYears();
     const rows = getPlanningRows();
 
@@ -2156,6 +2166,7 @@ window.APPCHECK_DEBUG = false;
       btn.addEventListener('click', () => {
         const v = btn.getAttribute('data-plan-year');
         planningYear = v === 'all' ? 'all' : parseInt(v);
+        planningYearChosen = true;
         render();
       });
     });
