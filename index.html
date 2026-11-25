@@ -472,6 +472,8 @@ window.APPCHECK_DEBUG = false;
       locationNotes: '',
       generalNotes: '',
       website: '',
+      contactName: '',
+      contactEmail: '',
       rating: 0,
       attendances: [emptyAttendance()]
     };
@@ -1275,13 +1277,15 @@ window.APPCHECK_DEBUG = false;
           'ROI ($)': calcROI(a),
           'Rating': s.rating || '',
           'Website': s.website || '',
+          'Contact name': s.contactName || '',
+          'Contact email': s.contactEmail || '',
           'Notes': a.notes || ''
         }));
       const ws = XLSX.utils.json_to_sheet(rows);
       ws['!cols'] = [
         { wch: 28 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 12 }, { wch: 12 },
         { wch: 8 }, { wch: 11 }, { wch: 12 }, { wch: 24 }, { wch: 15 }, { wch: 15 },
-        { wch: 14 }, { wch: 17 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 30 }, { wch: 40 }
+        { wch: 14 }, { wch: 17 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 8 }, { wch: 30 }, { wch: 20 }, { wch: 28 }, { wch: 40 }
       ];
       XLSX.utils.book_append_sheet(wb, ws, String(y));
     });
@@ -1361,6 +1365,8 @@ window.APPCHECK_DEBUG = false;
             name, year,
             location: String(get(['location', 'city'])).trim(),
             website: String(get(['website', 'url', 'link'])).trim(),
+            contactName: String(get(['contact name', 'contact'])).trim(),
+            contactEmail: String(get(['contact email', 'email'])).trim(),
             type: get(['type', 'show type']) ? importParseType(get(['type', 'show type'])) : '',
             rating: (rawRating >= 0 && rawRating <= 5) ? rawRating : '',
             status: get(['status']) ? importParseStatus(get(['status'])) : '',
@@ -1426,6 +1432,8 @@ window.APPCHECK_DEBUG = false;
       // Show-level fields — set only when the import provides a value.
       if (p.location) s.location = p.location;
       if (p.website) s.website = p.website;
+      if (p.contactName) s.contactName = p.contactName;
+      if (p.contactEmail) s.contactEmail = p.contactEmail;
       if (p.type) s.type = p.type;
       if (p.rating !== '') s.rating = p.rating;
       // Attendance for this year — update if present, else add.
@@ -1680,6 +1688,17 @@ window.APPCHECK_DEBUG = false;
           </div>
           <div class="field-row">
             <div class="field">
+              <label>Event contact name</label>
+              <input type="text" id="f-contact-name" value="${esc(s.contactName || '')}" placeholder="e.g. Jane Smith">
+            </div>
+            <div class="field">
+              <label>Event contact email</label>
+              <input type="email" id="f-contact-email" value="${esc(s.contactEmail || '')}" placeholder="e.g. jane@example.com">
+              ${s.contactEmail ? `<a href="mailto:${esc(String(s.contactEmail).trim())}" class="show-card-link" style="font-size:12px"><i class="ti ti-mail" style="font-size:12px"></i> Email ${esc(String(s.contactEmail).trim())}</a>` : ''}
+            </div>
+          </div>
+          <div class="field-row">
+            <div class="field">
               <label>Location notes (parking, logistics, hotel tips...)</label>
               <textarea id="f-locnotes" placeholder="Notes about the venue/city itself">${esc(s.locationNotes)}</textarea>
             </div>
@@ -1904,6 +1923,7 @@ window.APPCHECK_DEBUG = false;
       app.innerHTML = '<div class="loading-screen">Loading events…</div>';
       return;
     }
+    const uiState = captureUIState();
     const stats = getOverallStats();
     const filtered = getFilteredSortedShows();
 
@@ -1985,6 +2005,36 @@ window.APPCHECK_DEBUG = false;
     `;
 
     attachListeners();
+    restoreUIState(uiState);
+  }
+
+  // render() rebuilds the whole page, which would reset scroll position and drop
+  // keyboard focus (the "form jumps around" problem). Save and restore both.
+  function captureUIState() {
+    const app = document.getElementById('app');
+    const overlay = document.querySelector('.modal-overlay');
+    const ae = document.activeElement;
+    const hasFocus = ae && ae.id && app && app.contains(ae);
+    let selStart = null, selEnd = null;
+    if (hasFocus) { try { selStart = ae.selectionStart; selEnd = ae.selectionEnd; } catch (e) {} }
+    return {
+      overlayTop: overlay ? overlay.scrollTop : null,
+      winX: window.scrollX, winY: window.scrollY,
+      focusId: hasFocus ? ae.id : null, selStart, selEnd
+    };
+  }
+  function restoreUIState(st) {
+    if (!st) return;
+    const overlay = document.querySelector('.modal-overlay');
+    if (overlay && st.overlayTop != null) overlay.scrollTop = st.overlayTop;
+    window.scrollTo(st.winX, st.winY);
+    if (st.focusId) {
+      const el = document.getElementById(st.focusId);
+      if (el) {
+        el.focus({ preventScroll: true });
+        if (st.selStart != null) { try { el.setSelectionRange(st.selStart, st.selEnd); } catch (e) {} }
+      }
+    }
   }
 
   function attachListeners() {
@@ -2057,6 +2107,10 @@ window.APPCHECK_DEBUG = false;
     if (locInput) locInput.addEventListener('input', (e) => { getModalShow().location = e.target.value; });
     const websiteInput = document.getElementById('f-website');
     if (websiteInput) websiteInput.addEventListener('input', (e) => { getModalShow().website = e.target.value; });
+    const contactNameInput = document.getElementById('f-contact-name');
+    if (contactNameInput) contactNameInput.addEventListener('input', (e) => { getModalShow().contactName = e.target.value; });
+    const contactEmailInput = document.getElementById('f-contact-email');
+    if (contactEmailInput) contactEmailInput.addEventListener('input', (e) => { getModalShow().contactEmail = e.target.value; });
     const locNotes = document.getElementById('f-locnotes');
     if (locNotes) locNotes.addEventListener('input', (e) => { getModalShow().locationNotes = e.target.value; });
     const genNotes = document.getElementById('f-gennotes');
@@ -2082,7 +2136,9 @@ window.APPCHECK_DEBUG = false;
       // (blur for text/number, immediate for selects) so derived UI like the
       // ROI box and year-tab labels stay current.
       node.addEventListener('input', setVal);
-      node.addEventListener('change', (e) => { setVal(e); render(); });
+      // Defer the re-render until focus has moved (Tab/click) so the newly focused
+      // field is the one that gets focus restored.
+      node.addEventListener('change', (e) => { setVal(e); setTimeout(render, 0); });
     };
     bindAtt('f-year', 'year', v => parseInt(v) || new Date().getFullYear());
     bindAtt('f-status', 'status');
