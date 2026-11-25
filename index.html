@@ -766,7 +766,9 @@ window.APPCHECK_DEBUG = false;
       roster = v ? JSON.parse(v) : [];
     } catch(e) { roster = []; }
     if (!useCloud) {
-      try { rosterSeeded = localStorage.getItem(LS_PREFIX + 'rosterSeeded') === '1'; } catch(e) {}
+      try {
+        rosterSeedVersion = parseInt(localStorage.getItem(LS_PREFIX + 'rosterSeedVersion'), 10) || (localStorage.getItem(LS_PREFIX + 'rosterSeeded') === '1' ? 1 : 0);
+      } catch(e) {}
       maybeSeedRoster();
     } // cloud mode seeds after the first roster snapshot
     loaded = true;
@@ -790,7 +792,7 @@ window.APPCHECK_DEBUG = false;
         doc => {
           const data = doc.exists ? doc.data() : null;
           roster = (data && Array.isArray(data.reps)) ? data.reps : [];
-          if (data && data.seeded) rosterSeeded = true;
+          if (data) rosterSeedVersion = Math.max(rosterSeedVersion, data.seedVersion || (data.seeded ? 1 : 0));
           maybeSeedRoster(); // one-time import of the Territory rep list
           try { localStorage.setItem(LS_PREFIX + 'roster', JSON.stringify(roster)); } catch(e) {}
           if (!modalShowId) render();
@@ -886,9 +888,12 @@ window.APPCHECK_DEBUG = false;
   }
   async function saveRoster() {
     try { await storageSet('roster', JSON.stringify(roster)); } catch(e) {}
-    try { localStorage.setItem(LS_PREFIX + 'rosterSeeded', rosterSeeded ? '1' : '0'); } catch(e) {}
+    try {
+      localStorage.setItem(LS_PREFIX + 'rosterSeeded', rosterSeedVersion ? '1' : '0');
+      localStorage.setItem(LS_PREFIX + 'rosterSeedVersion', String(rosterSeedVersion));
+    } catch(e) {}
     if (useCloud && db) {
-      try { await db.collection('meta').doc('roster').set({ reps: roster, seeded: rosterSeeded }); }
+      try { await db.collection('meta').doc('roster').set({ reps: roster, seeded: rosterSeedVersion > 0, seedVersion: rosterSeedVersion }); }
       catch(e) { console.error('roster cloud save failed', e); }
     }
   }
@@ -905,16 +910,24 @@ window.APPCHECK_DEBUG = false;
     'Blake Brownell', 'Haywood Fox', 'David Teter', 'Jason Halsey', 'Kevin Upchurch',
     'Sean Mitchell', 'Steve Barnes', 'Lee Davis', 'Kristi Henderson'
   ];
-  let rosterSeeded = false;
+  // Later batches (from the Acteon Territory Contacts sheet, updated Nov 11, 2026).
+  // Each batch is merged once per roster, only adding names, so reps removed
+  // after an earlier batch are not re-added.
+  const REPS_V2 = [
+    'Jessica Ciotta', 'BJ Stelacone', 'Asher Markham', 'Joe Boris',
+    'Matt Lorimer', 'Sunny Radbakht'
+  ];
+  const SEED_BATCHES = [DEFAULT_REPS, REPS_V2];
+  let rosterSeedVersion = 0;
   let rosterSeedAttempted = false;
   function maybeSeedRoster() {
-    if (rosterSeedAttempted || rosterSeeded) return;
+    if (rosterSeedAttempted || rosterSeedVersion >= SEED_BATCHES.length) return;
     rosterSeedAttempted = true;
     const seen = new Set(roster.map(r => r.name.toLowerCase()));
-    DEFAULT_REPS.forEach(name => {
+    SEED_BATCHES.slice(rosterSeedVersion).forEach(batch => batch.forEach(name => {
       if (!seen.has(name.toLowerCase())) { roster.push({ id: uid(), name }); seen.add(name.toLowerCase()); }
-    });
-    rosterSeeded = true;
+    }));
+    rosterSeedVersion = SEED_BATCHES.length;
     saveRoster();
   }
 
