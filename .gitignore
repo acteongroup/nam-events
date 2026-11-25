@@ -1,1 +1,5 @@
 .claude/settings.local.json
+
+.env
+*.env
+index.local-backup.html
