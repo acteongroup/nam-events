@@ -128,8 +128,11 @@
   .show-card-meta { display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; }
   .pill { background: #eef3f6; color: var(--text-secondary); padding: 3px 9px; border-radius: 20px; font-weight: 600; }
   .pill.cyan { background: rgba(0,176,219,0.12); color: var(--cyan-dark); }
-  .pill.type-dealer { background: rgba(14,42,58,0.10); color: var(--navy); }
-  .pill.type-regional { background: rgba(29,158,117,0.14); color: var(--green); }
+  /* Event type: small colored dot + quiet text instead of a filled pill */
+  .pill.type-dealer, .pill.type-regional { background: none; padding: 3px 2px; font-weight: 500; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; }
+  .pill.type-dealer::before, .pill.type-regional::before { content: ''; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .pill.type-dealer::before { background: var(--navy); }
+  .pill.type-regional::before { background: var(--green); }
   .status-badge { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px; text-transform: uppercase; letter-spacing: 0.02em; white-space: nowrap; }
   .status-badge.committed { background: var(--green-bg); color: var(--green); }
   .status-badge.planned { background: var(--amber-bg); color: var(--amber); }
