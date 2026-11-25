@@ -156,6 +156,31 @@ The code is already wired in `index.html` — it stays off until you add a site 
   hit the 1 MB/doc limit. The whole `images` collection is loaded on startup; for very
   photo-heavy use the scalable upgrade is **Firebase Storage** (URLs instead of inline
   data, requires the Blaze plan) — ask when needed.
+- **Supporting files** (PDFs, Office docs…) upload to **Firebase Storage** (max 25 MB
+  each) and only the download URL is kept in the `files` collection. This needs
+  Storage enabled (Firebase console → Build → Storage → Get started; requires the Blaze
+  plan) and these rules published under Storage → **Rules**:
+
+  ```
+  rules_version = '2';
+  service firebase.storage {
+    match /b/{bucket}/o {
+      match /files/{allPaths=**} {
+        // Pilot (open): anyone with the app can read/write, 25 MB cap.
+        allow read: if true;
+        allow write: if request.resource.size < 25 * 1024 * 1024;
+        // For Phase B (Acteon sign-in) use instead:
+        // allow read, write: if request.auth != null
+        //   && request.auth.token.email.matches('.*@acteongroup[.]com$')
+        //   && (request.method == 'delete' || request.resource.size < 25 * 1024 * 1024);
+      }
+    }
+  }
+  ```
+
+  If Storage isn't set up, small files (≤ 700 KB) fall back to being stored inline in
+  Firestore as before. Phase B Firestore rules also need a `match /files/{fileId}`
+  line like the `images` one.
 - **Real-time:** edits made by one user appear for everyone within ~1 second.
 - **Offline:** the app still loads from a local cache and works offline; changes sync
   when the connection returns.

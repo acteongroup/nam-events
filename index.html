@@ -343,6 +343,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-check-compat.js"></script>
 
 <!-- SheetJS (xlsx) — client-side Excel import/export -->
@@ -410,6 +411,7 @@ window.APPCHECK_DEBUG = false;
   const useCloud = !!(cfg.apiKey && cfg.apiKey !== 'PASTE_API_KEY' && window.firebase);
   const requireAuth = useCloud && !!window.REQUIRE_SIGN_IN;
   let db = null;
+  let storage = null; // Firebase Storage (large supporting files)
   let auth = null;
   let currentUser = null;
   let authError = '';
@@ -430,6 +432,8 @@ window.APPCHECK_DEBUG = false;
       }
       db = firebase.firestore();
       auth = firebase.auth();
+      try { if (firebase.storage) storage = firebase.storage(); }
+      catch (e) { console.error('Firebase Storage init failed', e); }
     } catch (e) { console.error('Firebase init failed', e); }
   }
 
@@ -648,7 +652,7 @@ window.APPCHECK_DEBUG = false;
           const cloud = remoteFileDocs
             .filter(d => d.showId === s.id && d.attId === a.id)
             .sort((x, y) => (x.ts || 0) - (y.ts || 0))
-            .map(d => ({ id: d.id, dataUrl: d.dataUrl, name: d.name || 'file', type: d.type || '', size: d.size || 0 }));
+            .map(d => ({ id: d.id, dataUrl: d.dataUrl || '', url: d.url || '', path: d.path || '', name: d.name || 'file', type: d.type || '', size: d.size || 0 }));
           if (!cloud.length && Array.isArray(a.files) && a.files.length) {
             a.files.forEach(f => { if (f && f.dataUrl) cloudSaveFile(s.id, a.id, f); });
           } else {
@@ -848,13 +852,14 @@ window.APPCHECK_DEBUG = false;
   function cloudSaveFile(showId, attId, f) {
     if (!useCloud || !db) return;
     db.collection('files').doc(f.id).set({
-      id: f.id, showId, attId, dataUrl: f.dataUrl, name: f.name || 'file',
+      id: f.id, showId, attId, dataUrl: f.dataUrl || '', url: f.url || '', path: f.path || '', name: f.name || 'file',
       type: f.type || '', size: f.size || 0, ts: Date.now()
     }).catch(e => { console.error('file save failed', e); showToast('File save failed — try a smaller file'); });
   }
-  function cloudDeleteFile(fileId) {
+  function cloudDeleteFile(fileId, storagePath) {
     if (!useCloud || !db) return;
     db.collection('files').doc(fileId).delete().catch(e => console.error('file delete failed', e));
+    if (storagePath && storage) storage.ref(storagePath).delete().catch(e => console.error('storage delete failed', e));
   }
   // Delete every file doc matching a where-clause (used when a show/year is removed).
   async function deleteFileDocsWhere(...clauses) {
@@ -864,7 +869,11 @@ window.APPCHECK_DEBUG = false;
     const snap = await q.get();
     if (snap.empty) return;
     const batch = db.batch();
-    snap.forEach(d => batch.delete(d.ref));
+    snap.forEach(d => {
+      batch.delete(d.ref);
+      const p = d.data().path; // also remove the stored file from Firebase Storage
+      if (p && storage) storage.ref(p).delete().catch(e => console.error('storage delete failed', e));
+    });
     await batch.commit();
   }
   async function saveRoster() {
@@ -1074,25 +1083,59 @@ window.APPCHECK_DEBUG = false;
       reader.readAsDataURL(file);
     });
   }
-  // Supporting documents (PDFs, Office files, etc.) stored as their own docs in
-  // the `files` collection. Capped so each stays under Firestore's 1 MB per-doc
-  // limit (base64 inflates the raw bytes by ~33%).
-  const MAX_FILE_BYTES = 700 * 1024;
+  // Supporting documents (PDFs, Office files, etc.). With Firebase Storage the file
+  // itself is uploaded to Storage (up to MAX_STORAGE_FILE_BYTES) and only its URL +
+  // path are kept in the `files` collection. Without Storage (local-only mode, or
+  // Storage not set up) files are inlined as base64, which must stay under
+  // Firestore's 1 MB per-doc limit (base64 inflates raw bytes by ~33%).
+  const MAX_FILE_BYTES = 700 * 1024;               // inline fallback
+  const MAX_STORAGE_FILE_BYTES = 25 * 1024 * 1024; // Firebase Storage
+  const safeFileName = n => String(n || 'file').replace(/[^\w.\- ]+/g, '_').slice(0, 120);
+  // Only link to https download URLs (or inline data from legacy/local files).
+  function fileHref(f) {
+    if (f.url && /^https:\/\//i.test(f.url)) return f.url;
+    return f.dataUrl || '';
+  }
+  async function uploadToStorage(showId, attId, fileId, file) {
+    const path = `files/${showId}/${attId}/${fileId}-${safeFileName(file.name)}`;
+    const ref = storage.ref(path);
+    await ref.put(file, { contentType: file.type || 'application/octet-stream' });
+    const url = await ref.getDownloadURL();
+    return { url, path };
+  }
   function handleSupportingFiles(attId, files) {
     const s = getModalShow(); if (!s) return;
     const a = s.attendances.find(a => a.id === attId); if (!a) return;
     if (!Array.isArray(a.files)) a.files = [];
     [...files].forEach(async file => {
-      if (file.size > MAX_FILE_BYTES) {
-        showToast(file.name + ' is too large (max 700 KB per file)');
+      const useStorage = !!(useCloud && storage);
+      const limit = useStorage ? MAX_STORAGE_FILE_BYTES : MAX_FILE_BYTES;
+      if (file.size > limit) {
+        showToast(file.name + ' is too large (max ' + (useStorage ? '25 MB' : '700 KB') + ' per file)');
         return;
       }
       try {
-        const dataUrl = await readFileAsDataURL(file);
-        const f = { id: uid(), dataUrl, name: file.name, type: file.type || '', size: file.size };
+        const f = { id: uid(), name: file.name, type: file.type || '', size: file.size };
+        let stored = false;
+        if (useStorage) {
+          showToast('Uploading ' + file.name + '…');
+          try {
+            Object.assign(f, await uploadToStorage(s.id, attId, f.id, file));
+            stored = true;
+          } catch (e) {
+            console.error('storage upload failed', e);
+            if (file.size > MAX_FILE_BYTES) {
+              showToast('Upload failed for ' + file.name + ' — check Firebase Storage is enabled and its rules are published');
+              return;
+            }
+            // small file: fall through to the inline fallback below
+          }
+        }
+        if (!stored) f.dataUrl = await readFileAsDataURL(file);
         a.files.push(f);
         render();
         cloudSaveFile(s.id, attId, f); // persist immediately to the files collection
+        if (stored) showToast('Uploaded ' + file.name);
       } catch (e) {
         showToast('Could not read ' + file.name);
       }
@@ -1101,9 +1144,10 @@ window.APPCHECK_DEBUG = false;
   function removeSupportingFile(attId, fileId) {
     const s = getModalShow(); if (!s) return;
     const a = s.attendances.find(a => a.id === attId); if (!a) return;
+    const removed = (a.files || []).find(f => f.id === fileId);
     a.files = (a.files || []).filter(f => f.id !== fileId);
     render();
-    cloudDeleteFile(fileId);
+    cloudDeleteFile(fileId, removed && removed.path);
   }
 
   // ---------- Computed / filtering ----------
@@ -1873,7 +1917,7 @@ window.APPCHECK_DEBUG = false;
             ${(att.files || []).map(f => `
               <div class="file-item">
                 <i class="ti ${fileIcon(f)}"></i>
-                <a class="file-name" href="${f.dataUrl}" download="${esc(f.name)}" title="${esc(f.name)}">${esc(f.name)}</a>
+                <a class="file-name" href="${esc(fileHref(f))}" ${f.url ? 'target="_blank" rel="noopener"' : ''} download="${esc(f.name)}" title="${esc(f.name)}">${esc(f.name)}</a>
                 <span class="file-size">${fmtBytes(f.size)}</span>
                 <button class="file-rm" data-rm-file="${f.id}" data-att="${att.id}" title="Remove file">✕</button>
               </div>
