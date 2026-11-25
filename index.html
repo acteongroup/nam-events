@@ -1582,7 +1582,8 @@ window.APPCHECK_DEBUG = false;
   }
 
   function renderYearCompare() {
-    const byYear = getByBudgetYear();
+    // Skip years with nothing budgeted (e.g. a leftover $0 year with no spend).
+    const byYear = getByBudgetYear().filter(y => y.total > 0);
     if (!byYear.length) return '';
     return `
       <div class="year-compare">
