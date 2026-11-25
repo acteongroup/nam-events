@@ -917,16 +917,32 @@ window.APPCHECK_DEBUG = false;
     'Jessica Ciotta', 'BJ Stelacone', 'Asher Markham', 'Joe Boris',
     'Matt Lorimer', 'Sunny Radbakht'
   ];
-  const SEED_BATCHES = [DEFAULT_REPS, REPS_V2];
+  // Batch 3: keep only reps listed in the Territory Contacts sheet (Nov 11, 2026).
+  const TERRITORY_REPS = [
+    'Craig Hennings', 'Jessica Ciotta', 'Nick Frank', 'Thomas Dunn', 'Moh Hamdan',
+    'Christy Pate', 'Chris Strange', 'Ryan Renaud', 'Ray Degrazia', 'Elizabeth Paul',
+    'CJ Young', 'Rachel Torres', 'Addison Holstein', 'Erik Smith', 'Kevin Cronin',
+    'Talha Gonca', 'Jim Curd', 'BJ Stelacone', 'Rick Mulhern', 'Mantas Armonas',
+    'Patrick Fagan', 'John Catania', 'Asher Markham', 'Joe Boris', 'Colton Ruff',
+    'Peter Shea', 'Sean Mitchell', 'Matt Lorimer', 'Sunny Radbakht'
+  ];
+  const SEED_BATCHES = [DEFAULT_REPS, REPS_V2, 'prune'];
   let rosterSeedVersion = 0;
   let rosterSeedAttempted = false;
   function maybeSeedRoster() {
     if (rosterSeedAttempted || rosterSeedVersion >= SEED_BATCHES.length) return;
     rosterSeedAttempted = true;
     const seen = new Set(roster.map(r => r.name.toLowerCase()));
-    SEED_BATCHES.slice(rosterSeedVersion).forEach(batch => batch.forEach(name => {
-      if (!seen.has(name.toLowerCase())) { roster.push({ id: uid(), name }); seen.add(name.toLowerCase()); }
-    }));
+    SEED_BATCHES.slice(rosterSeedVersion).forEach(batch => {
+      if (batch === 'prune') {
+        const keep = new Set(TERRITORY_REPS.map(n => n.toLowerCase()));
+        roster = roster.filter(r => keep.has(r.name.toLowerCase()));
+        return;
+      }
+      batch.forEach(name => {
+        if (!seen.has(name.toLowerCase())) { roster.push({ id: uid(), name }); seen.add(name.toLowerCase()); }
+      });
+    });
     rosterSeedVersion = SEED_BATCHES.length;
     saveRoster();
   }
