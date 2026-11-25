@@ -3,3 +3,4 @@
 .env
 *.env
 index.local-backup.html
+import-events.csv
